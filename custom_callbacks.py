@@ -3,11 +3,11 @@ import math
 
 # BH 02/03/2023
 import tensorflow as tf
-from keras.utils import io_utils
-from keras.utils import tf_utils
+from tensorflow.python.keras.utils import io_utils
+from tensorflow.python.keras.utils import tf_utils
 from tensorflow.python.platform import tf_logging as logging
 import numpy as np
-from keras.distribute import distributed_file_utils
+from tensorflow.python.keras.distribute import distributed_file_utils
 import os
 import re
 
