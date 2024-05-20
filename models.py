@@ -84,13 +84,56 @@ class Yolov4(object):
                                     loss={'yolo_loss': lambda y_true, y_pred: y_pred})
 
     def load_model(self, path):
+        """Load a pre-trained model from file, including its weights."""
         self.yolo_model = models.load_model(path, compile=False)
         yolov4_output = yolov4_head(self.yolo_model.output, self.num_classes, self.anchors, self.xyscale)
+        # self.inference_model = models.Model(self.yolo_model.input,
+        #                                     nms(yolov4_output, self.img_size, self.num_classes))  # [boxes, scores, classes, valid_detections]
+
+        # BH 03/03/2023: Fixed bug in which config file parameters were not being passed to nms() method
         self.inference_model = models.Model(self.yolo_model.input,
-                                            nms(yolov4_output, self.img_size, self.num_classes))  # [boxes, scores, classes, valid_detections]
+                                            nms(yolov4_output,
+                                                self.img_size,
+                                                self.num_classes,
+                                                iou_threshold=self.config['iou_threshold'],
+                                                score_threshold=self.config['score_threshold']))  # [boxes, scores, classes, valid_detections]
+
+        # BH 03/03/2023: Build self.training_model to allow next training run to continue from end of previous run
+        y_true = [
+            layers.Input(name='input_2', shape=(52, 52, 3, (self.num_classes + 5))),  # label small boxes
+            layers.Input(name='input_3', shape=(26, 26, 3, (self.num_classes + 5))),  # label medium boxes
+            layers.Input(name='input_4', shape=(13, 13, 3, (self.num_classes + 5))),  # label large boxes
+            layers.Input(name='input_5', shape=(self.max_boxes, 4)),  # true bboxes
+        ]
+        loss_list = tf.keras.layers.Lambda(yolo_loss, name='yolo_loss',
+                                           arguments={'num_classes': self.num_classes,
+                                                      'iou_loss_thresh': self.iou_loss_thresh,
+                                                      'anchors': self.anchors})([*self.yolo_model.output, *y_true])
+        self.training_model = models.Model([self.yolo_model.input, *y_true], loss_list)
+        self.training_model.compile(optimizer=optimizers.Adam(learning_rate=1e-4),
+                                    loss={'yolo_loss': lambda y_true, y_pred: y_pred})
 
     def save_model(self, path):
         self.yolo_model.save(path)
+
+    # BH 01/03/2023
+    def summary(self):
+        """Print a summary of the model on the screen."""
+        self.yolo_model.summary()
+
+    # BH 01/03/2023
+    def plot_model(self, to_file='model.png', show_shapes=False, show_layer_names=True, rankdir='TB'):
+        """Save picture of model flowgraph to file in png format."""
+        tf.keras.utils.plot_model(self.yolo_model,
+                                  to_file=to_file,
+                                  show_shapes=show_shapes,
+                                  show_layer_names=show_layer_names,
+                                  rankdir=rankdir)
+
+    # BH 01/03/2023
+    def layer_list(self):
+        """Return a list of all layers in the model."""
+        return self.yolo_model.layers
 
     def preprocess_img(self, img):
         img = cv2.resize(img, self.img_size[:2])
@@ -107,7 +150,7 @@ class Yolov4(object):
                                 initial_epoch=initial_epoch)
     # raw_img: RGB
     def predict_img(self, raw_img, random_color=True, plot_img=True, figsize=(10, 10), show_text=True, return_output=False):
-        print('img shape: ', raw_img.shape)
+        # print('img shape: ', raw_img.shape)  # BH 03/03/2023
         img = self.preprocess_img(raw_img)
         imgs = np.expand_dims(img, axis=0)
         pred_output = self.inference_model.predict(imgs)
@@ -116,7 +159,8 @@ class Yolov4(object):
                                         class_names=self.class_names)
 
         output_img = draw_bbox(raw_img, detections, cmap=self.class_color, random_color=random_color, figsize=figsize,
-                  show_text=show_text, show_img=plot_img)
+                               show_text=show_text, show_img=plot_img)
+
         if return_output:
             return output_img, detections
         else:
@@ -527,4 +571,3 @@ class Yolov4(object):
                                         class_names=self.class_names)
         draw_bbox(raw_img, detections, cmap=self.class_color, random_color=True)
         return detections
-
